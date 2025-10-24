@@ -56,32 +56,6 @@ After deploying and restarting Keycloak:
 
 If the execution shows as Disabled or you cannot set it to REQUIRED, check the Troubleshooting section below.
 
-Troubleshooting
----------------
-Q: The execution shows as Disabled and I can't set it to REQUIRED in the flow.
-
-Common causes and fixes:
-
-- Service file FQN mismatch
-  - Ensure `META-INF/services/org.keycloak.authentication.AuthenticatorFactory` inside the JAR contains exactly:
-    `cz.cid.lwp.LwpIdAuthenticatorFactory` — the fully-qualified class name of your factory. If the package or class name differs, update the service file accordingly, repackage and redeploy.
-
-- `requiresUser()` in the Authenticator
-  - The authenticator currently implements `requiresUser()`; Keycloak will treat certain executions differently depending on this value. If your authenticator operates on an authenticated user (reads/sets attributes), it should return `true`. In `LwpIdAuthenticator` change:
-    ```java
-    @Override
-    public boolean requiresUser() { return true; }
-    ```
-    Rebuild and redeploy after this change.
-
-- Requirement choices not advertised by the factory
-  - `LwpIdAuthenticatorFactory#getRequirementChoices()` should include `REQUIRED` (and others as needed). This factory already exposes the common choices.
-
-- Split package warning / package name collision
-  - If you see warnings about split packages (e.g., `Detected a split package usage`), it means the same Java package appears in multiple JARs on the server. Choose a unique package name (for example include your organization domain) and rebuild to avoid conflicts with other installed providers.
-
-- Maven build warnings about plugin versions
-  - The POM should declare plugin versions. This project already sets `maven-compiler-plugin` version in `pom.xml`. If you see warnings, ensure your `pom.xml` contains explicit plugin versions.
 
 Validation checklist
 --------------------
@@ -98,7 +72,7 @@ Development notes and next steps
 
 License
 -------
-Put your license here or keep it private as needed.
+
 
 Contact
 -------
