@@ -1,4 +1,4 @@
-package cz.oltisgroup.keycloak;
+package cz.cid.lwp;
 
 import org.keycloak.Config;
 import org.keycloak.authentication.Authenticator;

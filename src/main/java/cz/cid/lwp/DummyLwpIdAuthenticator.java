@@ -1,4 +1,4 @@
-package cz.oltisgroup.keycloak;
+package cz.cid.lwp;
 
 import org.keycloak.authentication.AuthenticationFlowContext;
 import org.keycloak.authentication.Authenticator;
@@ -14,10 +14,10 @@ public class DummyLwpIdAuthenticator implements Authenticator {
     private static final Map<String, String> dummyDb = new HashMap<>();
 
     static {
-        dummyDb.put("jlisnik@svelkyemail.onmicrosoft.com", "6664");
-        dummyDb.put("jplandor@svelkyemail.onmicrosoft.com", "8586");
+        dummyDb.put("jlisnik@svelkyemail.onmicrosoft.com", "5686");
+        dummyDb.put("jplandor@svelkyemail.onmicrosoft.com", "4578");
         dummyDb.put("ext_test@awt.eu", "1234");
-        // Přidejte podle potřeby další položky
+
     }
 
     @Override
@@ -29,13 +29,10 @@ public class DummyLwpIdAuthenticator implements Authenticator {
             return;
         }
 
-        // Získáme username (login)
         String username = user.getUsername();
 
-        // Najdeme LwpID v dummy databázi podle username; defaultně null nebo prázdné
         String lwpId = dummyDb.getOrDefault(username, "LWP-UNKNOWN");
 
-        // Uložíme jako atribut do uživatele
         user.setAttribute("userLWPId", Collections.singletonList(lwpId));
 
         context.success();
