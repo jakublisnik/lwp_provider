@@ -17,7 +17,7 @@ public class LwpIdAuthenticatorFactory implements AuthenticatorFactory {
 
     @Override
     public String getId() {
-        return "dummy-lwpid-authenticator";
+        return PROVIDER_ID;
     }
 
     @Override

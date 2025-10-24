@@ -44,7 +44,7 @@ public class LwpIdAuthenticator implements Authenticator {
     }
 
     @Override
-    public boolean requiresUser() { return false; }
+    public boolean requiresUser() { return true; }
 
     @Override
     public boolean configuredFor(org.keycloak.models.KeycloakSession session, org.keycloak.models.RealmModel realm, UserModel user) { return true; }
