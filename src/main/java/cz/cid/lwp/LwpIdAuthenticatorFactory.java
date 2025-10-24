@@ -10,7 +10,7 @@ import org.keycloak.provider.ProviderConfigProperty;
 
 import java.util.List;
 
-public class DummyLwpIdAuthenticatorFactory implements AuthenticatorFactory {
+public class LwpIdAuthenticatorFactory implements AuthenticatorFactory {
 
     public static final String PROVIDER_ID = "dummy-lwpid-authenticator";
 
@@ -22,7 +22,7 @@ public class DummyLwpIdAuthenticatorFactory implements AuthenticatorFactory {
 
     @Override
     public Authenticator create(KeycloakSession session) {
-        return new DummyLwpIdAuthenticator();
+        return new LwpIdAuthenticator();
     }
 
     @Override

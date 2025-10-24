@@ -8,7 +8,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
-public class DummyLwpIdAuthenticator implements Authenticator {
+public class LwpIdAuthenticator implements Authenticator {
 
     // Dummy „databáze“ username → LwpID
     private static final Map<String, String> dummyDb = new HashMap<>();
