@@ -28,6 +28,12 @@
             <version>26.3.5</version>
             <scope>provided</scope>
         </dependency>
+        <!-- Azure Cosmos DB SDK -->
+        <dependency>
+            <groupId>com.azure</groupId>
+            <artifactId>azure-cosmos</artifactId>
+            <version>4.29.0</version>
+        </dependency>
     </dependencies>
     <build>
         <plugins>
