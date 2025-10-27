@@ -12,7 +12,7 @@ import java.util.List;
 
 public class LwpIdAuthenticatorFactory implements AuthenticatorFactory {
 
-    public static final String PROVIDER_ID = "dummy-lwpid-authenticator";
+    public static final String PROVIDER_ID = "lwpid-authenticator";
 
 
     @Override
@@ -72,7 +72,7 @@ public class LwpIdAuthenticatorFactory implements AuthenticatorFactory {
 
     @Override
     public String getHelpText() {
-        return "Authenticator that injects dummy LwpID attribute";
+        return "Authenticator that injects LwpID attribute from cosmos DB";
     }
 
     @Override
