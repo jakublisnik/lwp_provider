@@ -156,15 +156,15 @@ public class LwpIdAuthenticator implements Authenticator {
 
     private String findEmployeeId(AuthenticationFlowContext context, UserModel user) {
         // Try common attribute names on the Keycloak user
-        String emp = user.getFirstAttribute("employeeId");
+        String emp = user.getFirstAttribute("employeeid");
         if (emp != null) {
             logger.debug("findEmployeeId: found via user.getFirstAttribute('employeeId') => '{}'", emp);
-            return emp != null ? emp.trim() : null;
+            return emp.trim();
         }
-        emp = user.getFirstAttribute("EmployeeId");
+        emp = user.getFirstAttribute("employeeId");
         if (emp != null) {
             logger.debug("findEmployeeId: found via user.getFirstAttribute('EmployeeId') => '{}'", emp);
-            return emp != null ? emp.trim() : null;
+            return emp.trim();
         }
 
         // Try authentication session notes (if the claim was preserved there)
@@ -231,83 +231,6 @@ public class LwpIdAuthenticator implements Authenticator {
         }
 
         logger.debug("findEmployeeId: employeeId not found in attributes or session");
-        return null;
-    }
-
-    private String findCompanyId(AuthenticationFlowContext context, UserModel user) {
-        String comp = user.getFirstAttribute("companyId");
-        if (comp != null) {
-            logger.debug("findCompanyId: found via user.getFirstAttribute('companyId') => '{}'", comp);
-            return comp.trim();
-        }
-        comp = user.getFirstAttribute("CompanyId");
-        if (comp != null) {
-            logger.debug("findCompanyId: found via user.getFirstAttribute('CompanyId') => '{}'", comp);
-            return comp.trim();
-        }
-
-        try {
-            Object session = context.getAuthenticationSession();
-            if (session != null) {
-                logger.debug("findCompanyId: checking authentication session notes via reflection");
-                try {
-                    java.lang.reflect.Method mClientNote = session.getClass().getMethod("getClientNote", String.class);
-                    Object val = mClientNote.invoke(session, "companyId");
-                    if (val instanceof String) {
-                        logger.debug("findCompanyId: found via session.getClientNote('companyId') => '{}'", val);
-                        return ((String) val).trim();
-                    }
-                } catch (NoSuchMethodException ignored) {
-                    logger.debug("findCompanyId: session.getClientNote method not present");
-                }
-
-                try {
-                    java.lang.reflect.Method mClientNote2 = session.getClass().getMethod("getClientNote", String.class);
-                    Object val = mClientNote2.invoke(session, "CompanyId");
-                    if (val instanceof String) {
-                        logger.debug("findCompanyId: found via session.getClientNote('CompanyId') => '{}'", val);
-                        return ((String) val).trim();
-                    }
-                } catch (NoSuchMethodException ignored) {}
-
-                try {
-                    java.lang.reflect.Method mAuthNote = session.getClass().getMethod("getAuthNote", String.class);
-                    Object val = mAuthNote.invoke(session, "companyId");
-                    if (val instanceof String) {
-                        logger.debug("findCompanyId: found via session.getAuthNote('companyid') => '{}'", val);
-                        return ((String) val).trim();
-                    }
-                } catch (NoSuchMethodException ignored) {}
-
-                try {
-                    java.lang.reflect.Method mAuthNote2 = session.getClass().getMethod("getAuthNote", String.class);
-                    Object val = mAuthNote2.invoke(session, "CompanyId");
-                    if (val instanceof String) {
-                        logger.debug("findCompanyId: found via session.getAuthNote('CompanyId') => '{}'", val);
-                        return ((String) val).trim();
-                    }
-                } catch (NoSuchMethodException ignored) {}
-            } else {
-                logger.debug("findCompanyId: authentication session is null");
-            }
-        } catch (Exception e) {
-            logger.debug("findCompanyId: exception while inspecting authentication session", e);
-        }
-
-        Map<String, java.util.List<String>> attrs = user.getAttributes();
-        if (attrs != null) {
-            for (Map.Entry<String, java.util.List<String>> e : attrs.entrySet()) {
-                if (e.getKey() != null && e.getKey().equalsIgnoreCase("companyId")) {
-                    java.util.List<String> vals = e.getValue();
-                    if (vals != null && !vals.isEmpty()) {
-                        logger.debug("findCompanyId: found via user.getAttributes() key='{}' => '{}'", e.getKey(), vals.get(0));
-                        return vals.get(0).trim();
-                    }
-                }
-            }
-        }
-
-        logger.debug("findCompanyId: companyId not found in attributes or session");
         return null;
     }
 
