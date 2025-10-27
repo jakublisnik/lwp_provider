@@ -12,13 +12,18 @@ import java.util.Scanner;
 public class LwpCosmosTest {
     public static void main(String[] args) {
         String employeeId = null;
+        String companyId = null;
         if (args != null && args.length > 0) {
             employeeId = args[0];
+            if (args.length > 1) companyId = args[1];
         } else {
             System.out.print("Enter EmployeeId: ");
             Scanner sc = new Scanner(System.in);
             employeeId = sc.nextLine();
+            System.out.print("Enter CompanyId (optional): ");
+            companyId = sc.nextLine();
             sc.close();
+            if (companyId != null && companyId.trim().isEmpty()) companyId = null;
         }
 
         if (employeeId == null || employeeId.trim().isEmpty()) {
@@ -26,6 +31,7 @@ public class LwpCosmosTest {
             System.exit(1);
         }
         employeeId = employeeId.trim();
+        if (companyId != null) companyId = companyId.trim();
 
         String endpoint = "https://mobidriverdb.documents.azure.com:443/";
         String key = "6VWHXGXL0HkNU3M9mxTpDUbjvRB9WfeCzDRYvP9YCL8Mz5GEo37iDsPvotT26SMyGZ5CtknbvEMurju0n7SnyA==";
@@ -43,12 +49,25 @@ public class LwpCosmosTest {
             CosmosDatabase database = client.getDatabase(dbName);
             CosmosContainer container = database.getContainer(containerName);
 
-            String query = String.format("SELECT * FROM c WHERE c.Item.EmployeeId = %s", employeeId);
-            Object itemsObj = container.queryItems(query, new CosmosQueryRequestOptions(), Object.class);
+            // prepare employeeId for SQL: if non-numeric, quote and escape
+            String queryEmployee = employeeId;
+            if (!employeeId.matches("\\d+")) {
+                String escapedEmp = employeeId.replace("'", "''");
+                queryEmployee = "'" + escapedEmp + "'";
+            }
+            // prepare company filter if provided (CompanyId is a string)
+            String companyFilter = "";
+            if (companyId != null && !companyId.isEmpty()) {
+                String escapedCompany = companyId.replace("'", "''");
+                companyFilter = " AND c.Header.CompanyId = '" + escapedCompany + "'";
+            }
+
+            String query = String.format("SELECT * FROM c WHERE c.Item.EmployeeId = %s%s", queryEmployee, companyFilter);
+            Iterable<?> itemsObj = container.queryItems(query, new CosmosQueryRequestOptions(), Object.class);
 
             boolean found = false;
-            if (itemsObj instanceof Iterable) {
-                for (Object it : (Iterable<?>) itemsObj) {
+            if (itemsObj != null) {
+                for (Object it : itemsObj) {
                     if (it instanceof Map) {
                         @SuppressWarnings("unchecked")
                         Map<String, Object> doc = (Map<String, Object>) it;
@@ -57,7 +76,8 @@ public class LwpCosmosTest {
                             @SuppressWarnings("unchecked")
                             Map<String, Object> header = (Map<String, Object>) headerObj;
                             Object userLwp = header.get("UserLWPId");
-                            System.out.println("EmployeeId: " + employeeId + " -> UserLWPId: " + userLwp);
+                            Object companyIdFound = header.get("CompanyId");
+                            System.out.println("EmployeeId: " + employeeId + " -> UserLWPId: " + userLwp + ", CompanyId (doc): " + companyIdFound);
                             found = true;
                         } else {
                             System.out.println("Document Header is not a JSON object: " + headerObj);
@@ -85,4 +105,3 @@ public class LwpCosmosTest {
         }
     }
 }
-

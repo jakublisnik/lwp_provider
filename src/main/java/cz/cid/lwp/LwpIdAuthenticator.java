@@ -8,6 +8,8 @@ import com.azure.cosmos.models.CosmosQueryRequestOptions;
 import org.keycloak.authentication.AuthenticationFlowContext;
 import org.keycloak.authentication.Authenticator;
 import org.keycloak.models.UserModel;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -15,32 +17,23 @@ import java.util.Map;
 
 public class LwpIdAuthenticator implements Authenticator {
 
+    private static final Logger logger = LoggerFactory.getLogger(LwpIdAuthenticator.class);
+
     // Dummy „databáze“ username → LwpID (fallback)
-    private static final Map<String, String> dummyDb = new HashMap<>();
-
-    static {
-        dummyDb.put("jlisnik@svelkyemail.onmicrosoft.com", "5686");
-        dummyDb.put("jplandor@svelkyemail.onmicrosoft.com", "4578");
-        dummyDb.put("ext_test@awt.eu", "1234");
-
-    }
 
     // Cosmos DB client and container (lazy init)
     private static CosmosClient cosmosClient = null;
     private static CosmosContainer cosmosContainer = null;
 
     private static void initCosmos() {
+        logger.debug("initCosmos: checking COSMOS configuration");
         if (cosmosClient != null && cosmosContainer != null) return;
 
-        String endpoint = System.getenv("COSMOS_ENDPOINT");
-        String key = System.getenv("COSMOS_KEY");
-        String dbName = System.getenv("COSMOS_DATABASE");
-        String containerName = System.getenv("COSMOS_CONTAINER");
+        String endpoint = "https://mobidriverdb.documents.azure.com:443/";
+        String key = "6VWHXGXL0HkNU3M9mxTpDUbjvRB9WfeCzDRYvP9YCL8Mz5GEo37iDsPvotT26SMyGZ5CtknbvEMurju0n7SnyA==";
+        String dbName = "MobiDriver";
+        String containerName = "UserPKP";
 
-        if (endpoint == null || key == null || dbName == null || containerName == null) {
-            // missing configuration -> will fallback to dummyDb
-            return;
-        }
 
         try {
             cosmosClient = new CosmosClientBuilder()
@@ -50,7 +43,9 @@ public class LwpIdAuthenticator implements Authenticator {
 
             CosmosDatabase database = cosmosClient.getDatabase(dbName);
             cosmosContainer = database.getContainer(containerName);
+            logger.info("initCosmos: initialized Cosmos container {} in database {}", containerName, dbName);
         } catch (Exception e) {
+            logger.warn("initCosmos: failed to initialize Cosmos client/container", e);
             // if something goes wrong, keep cosmosContainer null and fall back
             cosmosContainer = null;
         }
@@ -58,59 +53,106 @@ public class LwpIdAuthenticator implements Authenticator {
 
     @Override
     public void authenticate(AuthenticationFlowContext context) {
+        logger.info("AUTH SPOSTI SE DEBUG");
         UserModel user = context.getUser();
 
         if (user == null) {
+            logger.warn("authenticate: user is null in context");
             context.failure(org.keycloak.authentication.AuthenticationFlowError.UNKNOWN_USER);
             return;
         }
 
         String username = user.getUsername();
+        logger.info("authenticate: start for username={}", username);
 
         // Try to locate EmployeeId from user attributes or auth session
         String employeeId = findEmployeeId(context, user);
+        // Try to locate CompanyId (string) from user attributes or auth session
+        logger.info("EMPLOYEE ID : {}", employeeId);
+        String companyId = findCompanyId(context, user);
+        logger.info("company ID : {}", companyId);
+        logger.debug("authenticate: resolved employeeId='{}', companyId='{}' for user={}", employeeId, companyId, username);
 
         String lwpId = null;
 
-        if (employeeId != null) {
+        if (employeeId == null) {
+            logger.warn("authenticate: no employeeId found for user='{}' - skipping Cosmos lookup", username);
+        } else {
             initCosmos();
-            if (cosmosContainer != null) {
+            if (cosmosContainer == null) {
+                logger.warn("authenticate: cosmosContainer is null after init - will use fallback for user='{}'", username);
+            } else {
                 try {
-                    // Query full document where Item.EmployeeId matches
-                    String query = String.format("SELECT * FROM c WHERE c.Item.EmployeeId = %s", employeeId);
-                    Object itemsObj = cosmosContainer.queryItems(query, new CosmosQueryRequestOptions(), Object.class);
+                    // Prepare EmployeeId for SQL: if non-numeric, quote and escape
+                    String queryEmployee = employeeId;
+                    if (!employeeId.matches("\\d+")) {
+                        String escapedEmp = employeeId.replace("'", "''");
+                        queryEmployee = "'" + escapedEmp + "'";
+                    }
+                    // Prepare CompanyId filter (CompanyId is a string) if present
+                    String companyFilter = "";
+                    if (companyId != null && !companyId.trim().isEmpty()) {
+                        String escComp = companyId.replace("'", "''");
+                        companyFilter = " AND c.Header.CompanyId = '" + escComp + "'";
+                    }
 
-                    if (itemsObj instanceof Iterable) {
-                        for (Object it : (Iterable<?>) itemsObj) {
+                    String query = String.format("SELECT * FROM c WHERE c.Item.EmployeeId = %s%s", queryEmployee, companyFilter);
+                    logger.info("authenticate: running Cosmos query: {}", query);
+                    Iterable<?> itemsObj = cosmosContainer.queryItems(query, new CosmosQueryRequestOptions(), Object.class);
+
+                    boolean anyDoc = false;
+                    if (itemsObj != null) {
+                        for (Object it : itemsObj) {
+                            anyDoc = true;
                             if (it instanceof Map) {
                                 @SuppressWarnings("unchecked")
                                 Map<String, Object> doc = (Map<String, Object>) it;
+                                Object docId = doc.get("id");
+                                logger.debug("authenticate: examining document id={}", docId);
                                 Object headerObj = doc.get("Header");
                                 if (headerObj instanceof Map) {
                                     @SuppressWarnings("unchecked")
                                     Map<String, Object> header = (Map<String, Object>) headerObj;
                                     Object userLwpObj = header.get("UserLWPId");
+                                    Object companyIdFound = header.get("CompanyId");
+                                    logger.debug("authenticate: document header CompanyId(doc)='{}', UserLWPId(doc)='{}'", companyIdFound, userLwpObj);
                                     if (userLwpObj != null) {
                                         lwpId = userLwpObj.toString();
+                                        logger.info("authenticate: found UserLWPId='{}' in Cosmos for employeeId='{}' (doc id={})", lwpId, employeeId, docId);
                                         break;
+                                    } else {
+                                        logger.debug("authenticate: document id={} has no UserLWPId in Header", docId);
                                     }
+                                } else {
+                                    logger.debug("authenticate: document id={} has no Header object (headerObj={})", docId, headerObj);
                                 }
+                            } else {
+                                logger.debug("authenticate: query returned non-map item: {}", it);
                             }
                         }
+                    } else {
+                        logger.debug("authenticate: query returned null iterable for employeeId='{}'", employeeId);
+                    }
+
+                    if (!anyDoc) {
+                        logger.info("authenticate: no documents returned for employeeId='{}' companyId='{}'", employeeId, companyId);
                     }
                 } catch (Exception e) {
+                    logger.warn("authenticate: error querying Cosmos for employeeId='{}' companyId='{}'", employeeId, companyId, e);
                     // ignore and fallback
                     lwpId = null;
                 }
             }
         }
 
-        // Fallback to dummy DB or default unknown
         if (lwpId == null) {
-            lwpId = dummyDb.getOrDefault(username, "LWP-UNKNOWN");
+            //lwpId = dummyDb.getOrDefault(username, "LWP-UNKNOWN");
+            logger.info("authenticate: using fallback LWP id='{}' for user='{}'", lwpId, username);
         }
 
         user.setAttribute("userLWPId", Collections.singletonList(lwpId));
+        logger.debug("authenticate: set user attribute userLWPId='{}' for user='{}'", lwpId, username);
+        logger.info("authenticate: final resolved lwpId='{}' for user='{}'", lwpId, username);
 
         context.success();
     }
@@ -118,71 +160,158 @@ public class LwpIdAuthenticator implements Authenticator {
     private String findEmployeeId(AuthenticationFlowContext context, UserModel user) {
         // Try common attribute names on the Keycloak user
         String emp = user.getFirstAttribute("employeeId");
-        if (emp == null) emp = user.getFirstAttribute("EmployeeId");
+        if (emp != null) {
+            logger.debug("findEmployeeId: found via user.getFirstAttribute('employeeId') => '{}'", emp);
+            return emp != null ? emp.trim() : null;
+        }
+        emp = user.getFirstAttribute("EmployeeId");
+        if (emp != null) {
+            logger.debug("findEmployeeId: found via user.getFirstAttribute('EmployeeId') => '{}'", emp);
+            return emp != null ? emp.trim() : null;
+        }
 
         // Try authentication session notes (if the claim was preserved there)
-        if (emp == null) {
-            try {
-                Object session = context.getAuthenticationSession();
-                if (session != null) {
-                    // use reflection to avoid direct dependency on AuthenticationSessionModel type
-                    try {
-                        java.lang.reflect.Method mClientNote = session.getClass().getMethod("getClientNote", String.class);
-                        Object val = mClientNote.invoke(session, "employeeId");
-                        if (val instanceof String) emp = (String) val;
-                    } catch (NoSuchMethodException ignored) {
+        try {
+            Object session = context.getAuthenticationSession();
+            if (session != null) {
+                logger.debug("findEmployeeId: checking authentication session notes via reflection");
+                try {
+                    java.lang.reflect.Method mClientNote = session.getClass().getMethod("getClientNote", String.class);
+                    Object val = mClientNote.invoke(session, "employeeId");
+                    if (val instanceof String) {
+                        logger.debug("findEmployeeId: found via session.getClientNote('employeeId') => '{}'", val);
+                        return ((String) val).trim();
                     }
-
-                    if (emp == null) {
-                        try {
-                            java.lang.reflect.Method mClientNote2 = session.getClass().getMethod("getClientNote", String.class);
-                            Object val = mClientNote2.invoke(session, "EmployeeId");
-                            if (val instanceof String) emp = (String) val;
-                        } catch (NoSuchMethodException ignored) {
-                        }
-                    }
-
-                    if (emp == null) {
-                        try {
-                            java.lang.reflect.Method mAuthNote = session.getClass().getMethod("getAuthNote", String.class);
-                            Object val = mAuthNote.invoke(session, "employeeId");
-                            if (val instanceof String) emp = (String) val;
-                        } catch (NoSuchMethodException ignored) {
-                        }
-                    }
-
-                    if (emp == null) {
-                        try {
-                            java.lang.reflect.Method mAuthNote2 = session.getClass().getMethod("getAuthNote", String.class);
-                            Object val = mAuthNote2.invoke(session, "EmployeeId");
-                            if (val instanceof String) emp = (String) val;
-                        } catch (NoSuchMethodException ignored) {
-                        }
-                    }
+                } catch (NoSuchMethodException ignored) {
+                    logger.debug("findEmployeeId: session.getClientNote method not present");
                 }
-            } catch (Exception ignored) {
+
+                try {
+                    java.lang.reflect.Method mClientNote2 = session.getClass().getMethod("getClientNote", String.class);
+                    Object val = mClientNote2.invoke(session, "EmployeeId");
+                    if (val instanceof String) {
+                        logger.debug("findEmployeeId: found via session.getClientNote('EmployeeId') => '{}'", val);
+                        return ((String) val).trim();
+                    }
+                } catch (NoSuchMethodException ignored) {}
+
+                try {
+                    java.lang.reflect.Method mAuthNote = session.getClass().getMethod("getAuthNote", String.class);
+                    Object val = mAuthNote.invoke(session, "employeeId");
+                    if (val instanceof String) {
+                        logger.debug("findEmployeeId: found via session.getAuthNote('employeeId') => '{}'", val);
+                        return ((String) val).trim();
+                    }
+                } catch (NoSuchMethodException ignored) {}
+
+                try {
+                    java.lang.reflect.Method mAuthNote2 = session.getClass().getMethod("getAuthNote", String.class);
+                    Object val = mAuthNote2.invoke(session, "EmployeeId");
+                    if (val instanceof String) {
+                        logger.debug("findEmployeeId: found via session.getAuthNote('EmployeeId') => '{}'", val);
+                        return ((String) val).trim();
+                    }
+                } catch (NoSuchMethodException ignored) {}
+            } else {
+                logger.debug("findEmployeeId: authentication session is null");
             }
+        } catch (Exception e) {
+            logger.debug("findEmployeeId: exception while inspecting authentication session", e);
         }
 
         // If still null, try realm/user attribute mapping for claim name "employeeId" (case-insensitive)
-        if (emp == null) {
-            Map<String, java.util.List<String>> attrs = user.getAttributes();
-            if (attrs != null) {
-                for (Map.Entry<String, java.util.List<String>> e : attrs.entrySet()) {
-                    if (e.getKey() != null && e.getKey().equalsIgnoreCase("employeeId")) {
-                        java.util.List<String> vals = e.getValue();
-                        if (vals != null && !vals.isEmpty()) {
-                            emp = vals.get(0);
-                            break;
-                        }
+        Map<String, java.util.List<String>> attrs = user.getAttributes();
+        if (attrs != null) {
+            for (Map.Entry<String, java.util.List<String>> e : attrs.entrySet()) {
+                if (e.getKey() != null && e.getKey().equalsIgnoreCase("employeeId")) {
+                    java.util.List<String> vals = e.getValue();
+                    if (vals != null && !vals.isEmpty()) {
+                        logger.debug("findEmployeeId: found via user.getAttributes() key='{}' => '{}'", e.getKey(), vals.get(0));
+                        return vals.get(0).trim();
                     }
                 }
             }
         }
 
-        // Trim/cleanup
-        if (emp != null) emp = emp.trim();
-        return emp;
+        logger.debug("findEmployeeId: employeeId not found in attributes or session");
+        return null;
+    }
+
+    private String findCompanyId(AuthenticationFlowContext context, UserModel user) {
+        String comp = user.getFirstAttribute("companyId");
+        if (comp != null) {
+            logger.debug("findCompanyId: found via user.getFirstAttribute('companyId') => '{}'", comp);
+            return comp.trim();
+        }
+        comp = user.getFirstAttribute("CompanyId");
+        if (comp != null) {
+            logger.debug("findCompanyId: found via user.getFirstAttribute('CompanyId') => '{}'", comp);
+            return comp.trim();
+        }
+
+        try {
+            Object session = context.getAuthenticationSession();
+            if (session != null) {
+                logger.debug("findCompanyId: checking authentication session notes via reflection");
+                try {
+                    java.lang.reflect.Method mClientNote = session.getClass().getMethod("getClientNote", String.class);
+                    Object val = mClientNote.invoke(session, "companyId");
+                    if (val instanceof String) {
+                        logger.debug("findCompanyId: found via session.getClientNote('companyId') => '{}'", val);
+                        return ((String) val).trim();
+                    }
+                } catch (NoSuchMethodException ignored) {
+                    logger.debug("findCompanyId: session.getClientNote method not present");
+                }
+
+                try {
+                    java.lang.reflect.Method mClientNote2 = session.getClass().getMethod("getClientNote", String.class);
+                    Object val = mClientNote2.invoke(session, "CompanyId");
+                    if (val instanceof String) {
+                        logger.debug("findCompanyId: found via session.getClientNote('CompanyId') => '{}'", val);
+                        return ((String) val).trim();
+                    }
+                } catch (NoSuchMethodException ignored) {}
+
+                try {
+                    java.lang.reflect.Method mAuthNote = session.getClass().getMethod("getAuthNote", String.class);
+                    Object val = mAuthNote.invoke(session, "companyId");
+                    if (val instanceof String) {
+                        logger.debug("findCompanyId: found via session.getAuthNote('companyid') => '{}'", val);
+                        return ((String) val).trim();
+                    }
+                } catch (NoSuchMethodException ignored) {}
+
+                try {
+                    java.lang.reflect.Method mAuthNote2 = session.getClass().getMethod("getAuthNote", String.class);
+                    Object val = mAuthNote2.invoke(session, "CompanyId");
+                    if (val instanceof String) {
+                        logger.debug("findCompanyId: found via session.getAuthNote('CompanyId') => '{}'", val);
+                        return ((String) val).trim();
+                    }
+                } catch (NoSuchMethodException ignored) {}
+            } else {
+                logger.debug("findCompanyId: authentication session is null");
+            }
+        } catch (Exception e) {
+            logger.debug("findCompanyId: exception while inspecting authentication session", e);
+        }
+
+        Map<String, java.util.List<String>> attrs = user.getAttributes();
+        if (attrs != null) {
+            for (Map.Entry<String, java.util.List<String>> e : attrs.entrySet()) {
+                if (e.getKey() != null && e.getKey().equalsIgnoreCase("companyId")) {
+                    java.util.List<String> vals = e.getValue();
+                    if (vals != null && !vals.isEmpty()) {
+                        logger.debug("findCompanyId: found via user.getAttributes() key='{}' => '{}'", e.getKey(), vals.get(0));
+                        return vals.get(0).trim();
+                    }
+                }
+            }
+        }
+
+        logger.debug("findCompanyId: companyId not found in attributes or session");
+        return null;
     }
 
     @Override
@@ -213,4 +342,3 @@ public class LwpIdAuthenticator implements Authenticator {
         }
     }
 }
-
