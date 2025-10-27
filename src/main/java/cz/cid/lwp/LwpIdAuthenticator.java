@@ -12,16 +12,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.Map;
 
 public class LwpIdAuthenticator implements Authenticator {
 
     private static final Logger logger = LoggerFactory.getLogger(LwpIdAuthenticator.class);
 
-    // Dummy „databáze“ username → LwpID (fallback)
-
-    // Cosmos DB client and container (lazy init)
     private static CosmosClient cosmosClient = null;
     private static CosmosContainer cosmosContainer = null;
 
@@ -53,7 +49,6 @@ public class LwpIdAuthenticator implements Authenticator {
 
     @Override
     public void authenticate(AuthenticationFlowContext context) {
-        logger.info("AUTH SPOSTI SE DEBUG");
         UserModel user = context.getUser();
 
         if (user == null) {
@@ -69,9 +64,7 @@ public class LwpIdAuthenticator implements Authenticator {
         String employeeId = findEmployeeId(context, user);
         // Try to locate CompanyId (string) from user attributes or auth session
         logger.info("EMPLOYEE ID : {}", employeeId);
-        String companyId = findCompanyId(context, user);
-        logger.info("company ID : {}", companyId);
-        logger.debug("authenticate: resolved employeeId='{}', companyId='{}' for user={}", employeeId, companyId, username);
+
 
         String lwpId = null;
 
@@ -89,14 +82,8 @@ public class LwpIdAuthenticator implements Authenticator {
                         String escapedEmp = employeeId.replace("'", "''");
                         queryEmployee = "'" + escapedEmp + "'";
                     }
-                    // Prepare CompanyId filter (CompanyId is a string) if present
-                    String companyFilter = "";
-                    if (companyId != null && !companyId.trim().isEmpty()) {
-                        String escComp = companyId.replace("'", "''");
-                        companyFilter = " AND c.Header.CompanyId = '" + escComp + "'";
-                    }
-
-                    String query = String.format("SELECT * FROM c WHERE c.Item.EmployeeId = %s%s", queryEmployee, companyFilter);
+                    // Query only by EmployeeId (company filter removed)
+                    String query = String.format("SELECT * FROM c WHERE c.Item.EmployeeId = %s", queryEmployee);
                     logger.info("authenticate: running Cosmos query: {}", query);
                     Iterable<?> itemsObj = cosmosContainer.queryItems(query, new CosmosQueryRequestOptions(), Object.class);
 
@@ -119,6 +106,16 @@ public class LwpIdAuthenticator implements Authenticator {
                                     if (userLwpObj != null) {
                                         lwpId = userLwpObj.toString();
                                         logger.info("authenticate: found UserLWPId='{}' in Cosmos for employeeId='{}' (doc id={})", lwpId, employeeId, docId);
+                                        // set companyId attribute on Keycloak user if present
+                                        if (companyIdFound != null) {
+                                            try {
+                                                String compVal = companyIdFound.toString();
+                                                user.setAttribute("companyId", Collections.singletonList(compVal));
+                                                logger.info("authenticate: set user attribute companyId='{}' for user='{}'", compVal, username);
+                                            } catch (Exception e) {
+                                                logger.warn("authenticate: failed to set companyId attribute for user='{}'", username, e);
+                                            }
+                                        }
                                         break;
                                     } else {
                                         logger.debug("authenticate: document id={} has no UserLWPId in Header", docId);
@@ -135,10 +132,10 @@ public class LwpIdAuthenticator implements Authenticator {
                     }
 
                     if (!anyDoc) {
-                        logger.info("authenticate: no documents returned for employeeId='{}' companyId='{}'", employeeId, companyId);
+                        logger.info("authenticate: no documents returned for employeeId='{}' ", employeeId);
                     }
                 } catch (Exception e) {
-                    logger.warn("authenticate: error querying Cosmos for employeeId='{}' companyId='{}'", employeeId, companyId, e);
+                    logger.warn("authenticate: error querying Cosmos for employeeId='{}'", employeeId, e);
                     // ignore and fallback
                     lwpId = null;
                 }
