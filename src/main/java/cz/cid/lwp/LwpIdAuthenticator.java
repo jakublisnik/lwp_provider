@@ -76,16 +76,13 @@ public class LwpIdAuthenticator implements Authenticator {
                 logger.warn("authenticate: cosmosContainer is null after init - will use fallback for user='{}'", username);
             } else {
                 try {
-                    // Prepare EmployeeId for SQL: if non-numeric, quote and escape
-                    String queryEmployee = employeeId;
-                    if (!employeeId.matches("\\d+")) {
-                        String escapedEmp = employeeId.replace("'", "''");
-                        queryEmployee = "'" + escapedEmp + "'";
-                    }
-                    // Query only by EmployeeId (company filter removed)
-                    String query = String.format("SELECT * FROM c WHERE c.Item.EmployeeId = %s", queryEmployee);
-                    logger.info("authenticate: running Cosmos query: {}", query);
-                    Iterable<?> itemsObj = cosmosContainer.queryItems(query, new CosmosQueryRequestOptions(), Object.class);
+                    // Prepare EmployeeId for SQL: documents store EmployeeId as string, always quote and escape
+                    String escapedEmp = employeeId.replace("'", "''");
+                    String queryEmployee = "'" + escapedEmp + "'";
+                     // Query only by EmployeeId (company filter removed)
+                     String query = String.format("SELECT * FROM c WHERE c.Item.EmployeeId = %s", queryEmployee);
+                     logger.info("authenticate: running Cosmos query: {}", query);
+                     Iterable<?> itemsObj = cosmosContainer.queryItems(query, new CosmosQueryRequestOptions(), Object.class);
 
                     boolean anyDoc = false;
                     if (itemsObj != null) {
